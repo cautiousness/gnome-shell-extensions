@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.vpn-status" path="/org/gnome/shell/extensions/vpn-status/">
+    <key name="show-indicator" type="b">
+      <default>true</default>
+      <summary>Show indicator</summary>
+      <description>Show or hide the VPN status indicator in the top bar.</description>
+    </key>
+    <key name="show-speed" type="b">
+      <default>false</default>
+      <summary>Show speed</summary>
+      <description>Show or hide upload and download speed in the top bar.</description>
+    </key>
+    <key name="show-country-flag" type="b">
+      <default>true</default>
+      <summary>Show country flag</summary>
+      <description>Show a country flag next to the top bar icon when a proxy is active and the country can be detected.</description>
+    </key>
+    <key name="geoip-url" type="s">
+      <default>'https://ipwho.is/'</default>
+      <summary>GeoIP URL</summary>
+      <description>URL used to detect the current outbound country code. The response should be a two-letter country code or JSON containing country_code.</description>
+    </key>
+    <key name="clash-api-url" type="s">
+      <default>''</default>
+      <summary>Clash API URL</summary>
+      <description>Base URL for the local Clash or Mihomo API.</description>
+    </key>
+    <key name="clash-secret" type="s">
+      <default>''</default>
+      <summary>Clash API secret</summary>
+      <description>Optional authorization secret for the local Clash or Mihomo API.</description>
+    </key>
+    <key name="ignored-interfaces" type="as">
+      <default>['lo']</default>
+      <summary>Ignored interfaces</summary>
+      <description>Network interface names ignored when calculating speed.</description>
+    </key>
+  </schema>
+</schemalist>

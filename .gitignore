@@ -1,0 +1,6 @@
+**/schemas/gschemas.compiled
+*.zip
+*.tar.gz
+.DS_Store
+Thumbs.db
+

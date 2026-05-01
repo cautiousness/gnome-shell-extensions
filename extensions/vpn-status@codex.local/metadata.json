@@ -1,0 +1,7 @@
+{
+  "uuid": "vpn-status@codex.local",
+  "name": "VPN Status",
+  "description": "Shows VPN, Clash/TUN status, and network throughput in the top bar.",
+  "shell-version": ["46"],
+  "settings-schema": "org.gnome.shell.extensions.vpn-status"
+}
