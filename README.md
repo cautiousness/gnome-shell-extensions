@@ -5,6 +5,7 @@ Personal GNOME Shell extensions for daily Linux desktop use.
 ## Extensions
 
 - `vpn-status@codex.local`: top bar VPN/proxy status indicator for Clash, OpenVPN, WireGuard, TUN interfaces, NetworkManager VPNs, and proxy country flag detection.
+- `clipboard-indicator@tudmotu.com`: Clipboard Indicator extension from Tudmotu, with a local patch that deduplicates clipboard history when loading and writing cache entries.
 
 ## Install
 
@@ -47,4 +48,4 @@ extensions/example@codex.local/metadata.json
 - GNOME Shell extension source code is usually JavaScript plus metadata and schema XML files.
 - `schemas/gschemas.compiled` is generated locally and is intentionally not committed.
 - GNOME Shell versions can require changes to `metadata.json` and extension APIs.
-
+- `clipboard-indicator@tudmotu.com` is a third-party extension. Keep its upstream URL in `metadata.json` and review local patches before updating it from upstream.
