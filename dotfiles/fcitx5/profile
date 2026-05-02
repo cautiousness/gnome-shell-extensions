@@ -1,0 +1,16 @@
+[Groups/0]
+# Group Name
+Name=中文
+# Layout
+Default Layout=us
+# Default Input Method
+DefaultIM=pinyin
+
+[Groups/0/Items/0]
+# Name
+Name=pinyin
+# Layout
+Layout=
+
+[GroupOrder]
+0=中文

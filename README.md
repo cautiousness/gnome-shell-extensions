@@ -26,6 +26,24 @@ It also compiles schemas when an extension has a `schemas/` directory, then enab
 
 After installation, log out and log back in if GNOME Shell does not show the extension immediately.
 
+## Restore Desktop Setup
+
+Run:
+
+```bash
+./scripts/restore-desktop.sh
+```
+
+This script installs the input-method packages needed for the current desktop setup, switches the system input-method framework to `fcitx5`, restores the bundled Fcitx5 profile, and enables the extensions in this repository.
+
+By default it keeps `ibus` installed and only switches the active framework. Use `--purge-ibus` only if you want the script to remove the `ibus` packages from the system.
+
+GNOME Shell extensions are still installed separately with:
+
+```bash
+./scripts/install.sh
+```
+
 ## Add Another Extension
 
 Create a new directory under `extensions/`. The directory name must match the `uuid` field in that extension's `metadata.json`.
