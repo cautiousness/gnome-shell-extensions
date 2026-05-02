@@ -6,6 +6,7 @@ Personal GNOME Shell extensions for daily Linux desktop use.
 
 - `vpn-status@codex.local`: top bar VPN/proxy status indicator for Clash, OpenVPN, WireGuard, TUN interfaces, NetworkManager VPNs, and proxy country flag detection.
 - `clipboard-indicator@tudmotu.com`: Clipboard Indicator extension from Tudmotu, with a local patch that deduplicates clipboard history when loading and writing cache entries.
+- `openweather-extension@penguin-teal.github.io`: OpenWeather Refined fork configured for QWeather/JWT, Chinese panel text, and local icon/theme fixes.
 
 ## Install
 
