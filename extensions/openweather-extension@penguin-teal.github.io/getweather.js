@@ -22,6 +22,7 @@ import { getIconName, gettextCondition } from "./weathericons.js"
 
 const QWEATHER_JWT_HELPER = GLib.build_filenamev([GLib.get_home_dir(), ".config", "qweather", "qweather-jwt.sh"]);
 const QWEATHER_CONFIG = GLib.build_filenamev([GLib.get_home_dir(), ".config", "qweather", "qweather.env"]);
+let qweatherJwtCache = null;
 
 export const DEFAULT_KEYS =
 [
@@ -227,6 +228,24 @@ export class Weather
     else throw new Error(`OpenWeather Refined Weather Condition '${condition}' was type '${typeof condition}' not string.`);
   }
 
+  withForecasts(forecasts, sunrise = this.#sunrise, sunset = this.#sunset)
+  {
+    return new Weather(
+      this.#tempC,
+      this.#feelsLikeC,
+      this.#humidityPercent,
+      this.#pressureMBar,
+      this.#windMps,
+      this.#windDirDeg,
+      this.#gustsMps,
+      this.#iconName,
+      this.#condition,
+      sunrise,
+      sunset,
+      forecasts
+    );
+  }
+
   /**
     * @returns {string}
     */
@@ -305,6 +324,7 @@ export class Weather
     */
   displaySunrise(extension)
   {
+    if (!(this.#sunrise instanceof Date)) return "-";
     return extension.formatTime(this.#sunrise);
   }
 
@@ -321,6 +341,7 @@ export class Weather
     */
   displaySunset(extension)
   {
+    if (!(this.#sunset instanceof Date)) return "-";
     return extension.formatTime(this.#sunset);
   }
 
@@ -428,6 +449,12 @@ export class Forecast
 
 function getQWeatherJwt()
 {
+  const now = Math.floor(Date.now() / 1000);
+  if (qweatherJwtCache?.token && qweatherJwtCache?.exp && qweatherJwtCache.exp > now + 30)
+  {
+    return qweatherJwtCache.token;
+  }
+
   try
   {
     let [ok, stdout, stderr, status] = GLib.spawn_command_line_sync(QWEATHER_JWT_HELPER);
@@ -438,12 +465,38 @@ function getQWeatherJwt()
       return "";
     }
 
-    return new TextDecoder().decode(stdout).trim();
+    let token = new TextDecoder().decode(stdout).trim();
+    let exp = decodeJwtExp(token);
+    qweatherJwtCache = {
+      token,
+      exp: exp ?? (now + 900)
+    };
+    return token;
   }
   catch(e)
   {
     console.error(`OpenWeather Refined: QWeather JWT helper failed: ${e}`);
     return "";
+  }
+}
+
+function decodeJwtExp(token)
+{
+  try
+  {
+    let parts = String(token).split(".");
+    if (parts.length < 2) return null;
+    let payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (payload.length % 4 !== 0) payload += "=";
+    let json = new TextDecoder().decode(GLib.base64_decode(payload));
+    let obj = JSON.parse(json);
+    let exp = Number.parseInt(obj?.exp, 10);
+    return Number.isFinite(exp) ? exp : null;
+  }
+  catch(e)
+  {
+    console.error(`OpenWeather Refined: Failed to decode QWeather JWT expiry: ${e}`);
+    return null;
   }
 }
 
@@ -569,6 +622,163 @@ function parseQWeatherTime(value)
   }
 
   return new Date(value);
+}
+
+function buildQWeatherForecasts(forecastJson, extension, gettext, currentNow)
+{
+  const KPH_TO_MPS = 1.0 / 3.6;
+  let today = forecastJson.daily?.[0] ?? {};
+  let sunrise = parseQWeatherTime(today.sunrise);
+  let sunset = parseQWeatherTime(today.sunset);
+  let gotDaysForecast = forecastJson.daily?.length ?? 0;
+  let forecastDays = clamp(1, extension._days_forecast + 1, gotDaysForecast);
+  extension._forecastDays = forecastDays - 1;
+
+  let forecasts = [];
+  for(let i = 0; i < forecastDays; i++)
+  {
+    let d = forecastJson.daily[i];
+    let day = [];
+    let start = new Date(`${d.fxDate}T00:00:00`);
+    let temp = (Number.parseFloat(d.tempMax) + Number.parseFloat(d.tempMin)) / 2;
+    let feels = temp;
+    let windMps = Number.parseFloat(d.windSpeedDay ?? 0) * KPH_TO_MPS;
+    let pressure = Number.parseFloat(d.pressure ?? currentNow.pressure ?? 0);
+    let humidity = Number.parseFloat(d.humidity ?? currentNow.humidity ?? 0);
+    let icon = d.iconDay ?? currentNow.icon;
+    let text = d.textDay ?? currentNow.text;
+    let daySunrise = parseQWeatherTime(d.sunrise);
+    let daySunset = parseQWeatherTime(d.sunset);
+
+    for(let j = 0; j < 8; j++)
+    {
+      let dt = new Date(start.getTime() + j * 3 * 3600000);
+      day.push(new Forecast(
+        dt,
+        new Date(dt.getTime() + 3 * 3600000),
+        new Weather(
+          temp,
+          feels,
+          humidity,
+          pressure,
+          windMps,
+          Number.parseFloat(d.wind360Day ?? 0),
+          undefined,
+          qweatherIconName(icon),
+          text,
+          daySunrise,
+          daySunset
+        )
+      ));
+    }
+    forecasts.push(day);
+  }
+
+  return {
+    sunrise,
+    sunset,
+    forecasts
+  };
+}
+
+export async function getQWeatherCurrentInfo(extension, gettext)
+{
+  const settings = extension.settings;
+  let location = await extension._city.getCoords(settings);
+  let lat = String(location[0]);
+  let lon = String(location[1]);
+
+  let token = getQWeatherJwt();
+  if(!token)
+  {
+    console.error("OpenWeather Refined: QWeather requires a valid JWT helper token.");
+    return null;
+  }
+
+  let apiBase = getQWeatherApiBase();
+  if(!apiBase)
+  {
+    console.error("OpenWeather Refined: QWeather requires QWEATHER_API_HOST in ~/.config/qweather/qweather.env.");
+    return null;
+  }
+
+  let params =
+  {
+    location: `${lon},${lat}`,
+    lang: "zh",
+    unit: "m"
+  };
+  const headers = {
+    Authorization: `Bearer ${token}`
+  };
+
+  let response;
+  let forecastResponsePromise;
+  try
+  {
+    let cur = loadJsonAsync(`${apiBase}/v7/weather/now`, params, headers, true);
+    let fore = loadJsonAsync(`${apiBase}/v7/weather/3d`, params, headers, true);
+    forecastResponsePromise = fore.catch((e) => {
+      console.error(`OpenWeather Refined: Failed to fetch QWeather forecast ('${e.message ?? e}').`);
+      return null;
+    });
+    response = await cur;
+  }
+  catch(e)
+  {
+    console.error(`OpenWeather Refined: Failed to fetch weather from QWeather ('${e.message ?? e}').`);
+    return null;
+  }
+
+  let json = response[1];
+  if(!isSuccess(response[0]) || json?.code !== "200")
+  {
+    console.error(`OpenWeather Refined: Invalid API Response from QWeather ${response[0]}: '${json?.code}'.`);
+    if(json?.code === "402") throw new TooManyReqError(WeatherProvider.QWEATHER);
+    return null;
+  }
+
+  let m = json.now;
+  let currentWeather = new Weather(
+    Number.parseFloat(m.temp),
+    Number.parseFloat(m.feelsLike ?? m.temp),
+    Number.parseFloat(m.humidity),
+    Number.parseFloat(m.pressure),
+    Number.parseFloat(m.windSpeed ?? 0) * (1.0 / 3.6),
+    Number.parseFloat(m.wind360 ?? 0),
+    undefined,
+    qweatherIconName(m.icon),
+    m.text,
+    null,
+    null,
+    null
+  );
+
+  let forecastPromise = (async () =>
+  {
+    let forecastResponse = await forecastResponsePromise;
+    if(!forecastResponse) return null;
+
+    let forecastJson = forecastResponse[1];
+    if(!isSuccess(forecastResponse[0]) || forecastJson?.code !== "200")
+    {
+      console.error(`OpenWeather Refined: Invalid forecast response from QWeather ${forecastResponse[0]}: '${forecastJson?.code}'.`);
+      if(forecastJson?.code === "402") throw new TooManyReqError(WeatherProvider.QWEATHER);
+      return null;
+    }
+
+    let { sunrise, sunset, forecasts } = buildQWeatherForecasts(forecastJson, extension, gettext, json.now);
+    return currentWeather.withForecasts(forecasts, sunrise, sunset);
+  })().catch((e) =>
+  {
+    console.error(`OpenWeather Refined: Failed to build QWeather forecast cache: ${e}`);
+    return null;
+  });
+
+  return {
+    weather: currentWeather,
+    forecastPromise
+  };
 }
 
 /**
@@ -923,119 +1133,10 @@ export async function getWeatherInfo(extension, gettext)
 
     case WeatherProvider.QWEATHER:
       {
-        let token = getQWeatherJwt();
-        if(!token)
-        {
-          console.error("OpenWeather Refined: QWeather requires a valid JWT helper token.");
-          return null;
-        }
-        let apiBase = getQWeatherApiBase();
-        if(!apiBase)
-        {
-          console.error("OpenWeather Refined: QWeather requires QWEATHER_API_HOST in ~/.config/qweather/qweather.env.");
-          return null;
-        }
-
-        params =
-        {
-          location: `${lon},${lat}`,
-          lang: "zh",
-          unit: "m"
-        };
-        const headers = {
-          Authorization: `Bearer ${token}`
-        };
-
-        let response;
-        let forecastResponse;
-        try
-        {
-          let cur = loadJsonAsync(`${apiBase}/v7/weather/now`, params, headers, true);
-          let fore = loadJsonAsync(`${apiBase}/v7/weather/3d`, params, headers, true);
-          let allResp = await Promise.all([ cur, fore ]);
-          response = allResp[0];
-          forecastResponse = allResp[1];
-        }
-        catch(e)
-        {
-          console.error(`OpenWeather Refined: Failed to fetch weather from QWeather ('${e.message ?? e}').`);
-          return null;
-        }
-
-        let json = response[1];
-        let forecastJson = forecastResponse[1];
-        if(!isSuccess(response[0]) || !isSuccess(forecastResponse[0]) ||
-          json?.code !== "200" || forecastJson?.code !== "200")
-        {
-          console.error(`OpenWeather Refined: Invalid API Response from QWeather ` +
-            `${response[0]}/${forecastResponse[0]}: '${json?.code}'/'${forecastJson?.code}'.`);
-          if(json?.code === "402" || forecastJson?.code === "402") throw new TooManyReqError(WeatherProvider.QWEATHER);
-          return null;
-        }
-
-        const KPH_TO_MPS = 1.0 / 3.6;
-        let m = json.now;
-        let today = forecastJson.daily?.[0] ?? {};
-        let sunrise = parseQWeatherTime(today.sunrise);
-        let sunset = parseQWeatherTime(today.sunset);
-        let gotDaysForecast = forecastJson.daily?.length ?? 0;
-        let forecastDays = clamp(1, extension._days_forecast + 1, gotDaysForecast);
-        extension._forecastDays = forecastDays - 1;
-
-        let forecasts = [];
-        for(let i = 0; i < forecastDays; i++)
-        {
-          let d = forecastJson.daily[i];
-          let day = [];
-          let start = new Date(`${d.fxDate}T00:00:00`);
-          let temp = (Number.parseFloat(d.tempMax) + Number.parseFloat(d.tempMin)) / 2;
-          let feels = temp;
-          let windMps = Number.parseFloat(d.windSpeedDay ?? 0) * KPH_TO_MPS;
-          let pressure = Number.parseFloat(d.pressure ?? m.pressure ?? 0);
-          let humidity = Number.parseFloat(d.humidity ?? m.humidity ?? 0);
-          let icon = d.iconDay ?? m.icon;
-          let text = d.textDay ?? m.text;
-          let daySunrise = parseQWeatherTime(d.sunrise);
-          let daySunset = parseQWeatherTime(d.sunset);
-
-          for(let j = 0; j < 8; j++)
-          {
-            let dt = new Date(start.getTime() + j * 3 * 3600000);
-            day.push(new Forecast(
-              dt,
-              new Date(dt.getTime() + 3 * 3600000),
-              new Weather(
-                temp,
-                feels,
-                humidity,
-                pressure,
-                windMps,
-                Number.parseFloat(d.wind360Day ?? 0),
-                undefined,
-                qweatherIconName(icon),
-                text,
-                daySunrise,
-                daySunset
-              )
-            ));
-          }
-          forecasts.push(day);
-        }
-
-        return new Weather(
-          Number.parseFloat(m.temp),
-          Number.parseFloat(m.feelsLike ?? m.temp),
-          Number.parseFloat(m.humidity),
-          Number.parseFloat(m.pressure),
-          Number.parseFloat(m.windSpeed ?? 0) * KPH_TO_MPS,
-          Number.parseFloat(m.wind360 ?? 0),
-          undefined,
-          qweatherIconName(m.icon),
-          m.text,
-          sunrise,
-          sunset,
-          forecasts
-        );
+        let qweather = await getQWeatherCurrentInfo(extension, gettext);
+        if(!qweather) return null;
+        qweather.forecastPromise?.catch(() => {});
+        return qweather.weather;
       }
 
     case WeatherProvider.OPENMETEO:

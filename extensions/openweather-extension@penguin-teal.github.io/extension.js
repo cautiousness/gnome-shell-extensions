@@ -179,7 +179,7 @@ class OpenWeatherMenuButton extends PanelMenu.Button {
       Main.panel.menuManager.addMenu(this.menu);
     else Main.panel._menus.addMenu(this.menu);
 
-    this.loadConfig().then(() =>
+      this.loadConfig().then(() =>
     {
       // Setup network things
       this._idle = false;
@@ -201,7 +201,7 @@ class OpenWeatherMenuButton extends PanelMenu.Button {
         this._onNetworkStateChanged.bind(this)
       );
 
-      this.menu.connect("open-state-changed", this.recalcLayout.bind(this));
+      this.menu.connect("open-state-changed", (_menu, open) => this._onMenuOpenStateChanged(open));
 
       let _firstBootWait = this._startupDelay;
       if (_firstBoot && _firstBootWait !== 0)
@@ -327,6 +327,21 @@ class OpenWeatherMenuButton extends PanelMenu.Button {
       this._timeoutCheckConnectionState = null;
     }
 
+    if (this._detailedWeatherRefreshTimeout) {
+      GLib.source_remove(this._detailedWeatherRefreshTimeout);
+      this._detailedWeatherRefreshTimeout = null;
+    }
+
+    if (this._layoutRecalcTimeout) {
+      GLib.source_remove(this._layoutRecalcTimeout);
+      this._layoutRecalcTimeout = null;
+    }
+
+    if (this._currentDetailsRefreshTimeout) {
+      GLib.source_remove(this._currentDetailsRefreshTimeout);
+      this._currentDetailsRefreshTimeout = null;
+    }
+
     if (this._presence_connection) {
       this._presence.disconnectSignal(this._presence_connection);
       this._presence_connection = undefined;
@@ -370,7 +385,9 @@ class OpenWeatherMenuButton extends PanelMenu.Button {
     this.initWeatherData = OpenWeatherMap.initWeatherData;
     this.reloadWeatherCache = OpenWeatherMap.reloadWeatherCache;
     this.refreshWeatherData = OpenWeatherMap.refreshWeatherData;
+    this._scheduleDetailedWeatherRefresh = OpenWeatherMap._scheduleDetailedWeatherRefresh;
     this.populateCurrentUI = OpenWeatherMap.populateCurrentUI;
+    this.populateCurrentDetailsUI = OpenWeatherMap.populateCurrentDetailsUI;
 
     if (!this._isForecastDisabled) {
       this.populateTodaysUI = OpenWeatherMap.populateTodaysUI;
@@ -1207,6 +1224,54 @@ class OpenWeatherMenuButton extends PanelMenu.Button {
     );
   }
 
+  _onMenuOpenStateChanged(open) {
+    this.recalcLayout();
+
+    if (!open && this._pendingCurrentDetailsRefresh) {
+      this._pendingCurrentDetailsRefresh = false;
+      this._scheduleCurrentDetailsRefresh();
+    }
+
+    if (!open && this._pendingDetailedWeatherRefresh) {
+      this._pendingDetailedWeatherRefresh = false;
+      this._scheduleDetailedWeatherRefresh();
+    }
+  }
+
+  _scheduleCurrentDetailsRefresh() {
+    if (this._currentDetailsRefreshTimeout) {
+      GLib.source_remove(this._currentDetailsRefreshTimeout);
+      this._currentDetailsRefreshTimeout = null;
+    }
+
+    this._currentDetailsRefreshTimeout = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT_IDLE,
+      1,
+      () => {
+        this._currentDetailsRefreshTimeout = null;
+        this.populateCurrentDetailsUI().catch(e => console.error(e));
+        return GLib.SOURCE_REMOVE;
+      }
+    );
+  }
+
+  _scheduleLayoutRecalc() {
+    if (this._layoutRecalcTimeout) {
+      GLib.source_remove(this._layoutRecalcTimeout);
+      this._layoutRecalcTimeout = null;
+    }
+
+    this._layoutRecalcTimeout = GLib.timeout_add(
+      GLib.PRIORITY_DEFAULT_IDLE,
+      1,
+      () => {
+        this._layoutRecalcTimeout = null;
+        this.recalcLayout();
+        return GLib.SOURCE_REMOVE;
+      }
+    );
+  }
+
   _simplifyDegrees()
   {
     return this.settings.get_boolean("simplify-degrees");
@@ -1610,8 +1675,13 @@ class OpenWeatherMenuButton extends PanelMenu.Button {
 
   showRefreshing()
   {
-    this._currentWeatherSummary.text = _("Loading ...");
-    this._currentWeatherIcon.icon_name = "view-refresh-symbolic";
+    if (this._reloadButton) {
+      this._reloadButton.reactive = false;
+      this._reloadButton.can_focus = false;
+      if (this._reloadButton.child) {
+        this._reloadButton.child.icon_name = "process-working-symbolic";
+      }
+    }
   }
 
   cssConcatClass(left, right)
